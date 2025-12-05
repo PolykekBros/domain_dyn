@@ -81,19 +81,11 @@ impl MagnMoment {
             y: rand::random(),
             z: rand::random(),
         }
-        .vec_prod_const(m_abs)
+        .const_prod(m_abs)
         .normalize()
     }
 
-    fn vec_prod(v1: Self, v2: Self) -> Self {
-        Self {
-            x: v1.y * v2.z - v1.z * v2.y,
-            y: v1.x * v2.z - v1.z * v2.x,
-            z: v1.x * v2.y - v1.y * v2.x,
-        }
-    }
-
-    fn vec_prod_const(self, a: f64) -> Self {
+    fn const_prod(self, a: f64) -> Self {
         Self {
             x: self.x * a,
             y: self.y * a,
@@ -107,6 +99,14 @@ impl MagnMoment {
 
     fn get_abs(self) -> f64 {
         (self.x.powi(2) + self.y.powi(2) + self.z.powi(2)).sqrt()
+    }
+}
+
+fn vec_prod(v1: MagnMoment, v2: MagnMoment) -> MagnMoment {
+    MagnMoment {
+        x: v1.y * v2.z - v1.z * v2.y,
+        y: v1.x * v2.z - v1.z * v2.x,
+        z: v1.x * v2.y - v1.y * v2.x,
     }
 }
 
@@ -138,9 +138,45 @@ fn gen_lattice(n: usize, m: usize) -> Vec<MagnMoment> {
     (0..n * m).map(|_| MagnMoment::random(1.0)).collect()
 }
 
+fn runge_kutta(
+    lat: &mut [MagnMoment],
+    m: usize,
+    gamma: f64,
+    alpha: f64,
+    dt: f64,
+    j: f64,
+    k: f64,
+    h_ext: MagnMoment,
+    l_axis: MagnMoment,
+) {
+    let lat_tmp = lat.to_vec();
+    lat_tmp.iter().enumerate().map(|(idx, magn)| {
+        let row = idx / m;
+        let col = idx % m;
+        let coord = (row, col);
+        let mut h_eff = get_h_eff(lat, m, coord, j, k, h_ext, l_axis);
+        let k1 = llg_eq(gamma, alpha, *magn, h_eff).const_prod(dt);
+        h_eff = get_h_eff(lat, m, coord, j, k, h_ext, l_axis);
+        let k2 = llg_eq(gamma, alpha, *magn + k1.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
+        h_eff = get_h_eff(lat, m, coord, j, k, h_ext, l_axis);
+        let k3 = llg_eq(gamma, alpha, *magn + k2.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
+        h_eff = get_h_eff(lat, m, coord, j, k, h_ext, l_axis);
+        let k4 = llg_eq(gamma, alpha, *magn + k3, h_eff).const_prod(dt);
+        lat[idx] = lat[idx]
+            + (k1 + k2.const_prod(2.0) + k3.const_prod(2.0) + k4)
+                .const_prod(1.0 / 6.0)
+                .normalize()
+    });
+}
+
+fn llg_eq(gamma: f64, alpha: f64, magn: MagnMoment, h_eff: MagnMoment) -> MagnMoment {
+    (vec_prod(magn, h_eff)
+        + vec_prod(magn, vec_prod(magn, h_eff)).const_prod(alpha / magn.get_abs()))
+    .const_prod(-gamma / (1.0 + alpha.powi(2)))
+}
+
 fn get_h_eff(
     lat: &[MagnMoment],
-    n: usize,
     m: usize,
     coord: (usize, usize),
     j: f64,
@@ -150,22 +186,17 @@ fn get_h_eff(
 ) -> MagnMoment {
     let h_exc = exchange_inter(lat, m, j, coord);
     let h_ani = aniso_inter(lat, m, k, coord, l_axis);
-    let h_dipole = dipol_inter(lat, n, coord);
+    let h_dipole = dipol_inter(lat, m, coord);
     h_ext + h_exc + h_ani + h_dipole
 }
 
-fn exchange_inter(
-    lat: &[MagnMoment],
-    m: usize,
-    j: f64,
-    (row, col): (usize, usize),
-) -> MagnMoment {
+fn exchange_inter(lat: &[MagnMoment], m: usize, j: f64, (row, col): (usize, usize)) -> MagnMoment {
     (lat[m * row + col]
         + lat[m * row + col - 1]
         + lat[m * row + col + 1]
         + lat[m * (row - 1) + col]
         + lat[m * (row + 1) + col])
-        .vec_prod_const(j)
+        .const_prod(j)
 }
 
 fn aniso_inter(
@@ -175,7 +206,7 @@ fn aniso_inter(
     (row, col): (usize, usize),
     l_axis: MagnMoment,
 ) -> MagnMoment {
-    l_axis.vec_prod_const(2.0 * k * lat[m * row + col].scalar_prod(l_axis))
+    l_axis.const_prod(2.0 * k * lat[m * row + col].scalar_prod(l_axis))
 }
 
 fn dipol_inter(lat: &[MagnMoment], m: usize, (row, col): (usize, usize)) -> MagnMoment {
@@ -191,8 +222,8 @@ fn dipol_inter(lat: &[MagnMoment], m: usize, (row, col): (usize, usize)) -> Magn
                 z: 0.0,
             };
             let r_ij_len = r_ij.get_abs();
-                s.vec_prod_const(1.0 / r_ij_len.powi(3))
-                    + r_ij.vec_prod_const(-3.0 * s.scalar_prod(r_ij) / r_ij_len.powi(5))
+            s.const_prod(1.0 / r_ij_len.powi(3))
+                + r_ij.const_prod(-3.0 * s.scalar_prod(r_ij) / r_ij_len.powi(5))
         })
         .sum::<MagnMoment>()
 }
@@ -210,7 +241,7 @@ fn main() {
         y: 1.0,
         z: 0.0,
     };
-    let lat = gen_lattice(100, 100);
+    let mut lat = gen_lattice(100, 100);
     let h_eff = get_h_eff(&lat, n, m, (5, 5), 10.0, 48.0, h_ext, l_axis);
     println!("H_eff = {}", h_eff.get_abs());
     plot_lat(lat, n, m, "init_lat.png").unwrap();
