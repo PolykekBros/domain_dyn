@@ -139,7 +139,7 @@ fn gen_lattice(n: usize, m: usize) -> Vec<MagnMoment> {
 }
 
 fn get_h_eff(
-    lat: &Vec<MagnMoment>,
+    lat: &[MagnMoment],
     n: usize,
     m: usize,
     coord: (usize, usize),
@@ -155,7 +155,7 @@ fn get_h_eff(
 }
 
 fn exchange_inter(
-    lat: &Vec<MagnMoment>,
+    lat: &[MagnMoment],
     m: usize,
     j: f64,
     (row, col): (usize, usize),
@@ -169,7 +169,7 @@ fn exchange_inter(
 }
 
 fn aniso_inter(
-    lat: &Vec<MagnMoment>,
+    lat: &[MagnMoment],
     m: usize,
     k: f64,
     (row, col): (usize, usize),
@@ -178,14 +178,11 @@ fn aniso_inter(
     l_axis.vec_prod_const(2.0 * k * lat[m * row + col].scalar_prod(l_axis))
 }
 
-fn dipol_inter(lat: &Vec<MagnMoment>, m: usize, (row, col): (usize, usize)) -> MagnMoment {
-    let s_i = row * m + col;
+fn dipol_inter(lat: &[MagnMoment], m: usize, (row, col): (usize, usize)) -> MagnMoment {
     lat.iter()
         .enumerate()
-        .filter_map(|(idx, s)| {
-            if idx == s_i {
-                return None;
-            }
+        .filter(|(idx, _)| *idx != row * m + col)
+        .map(|(idx, s)| {
             let row_j = (idx / m) as f64;
             let col_j = (idx % m) as f64;
             let r_ij = MagnMoment {
@@ -194,10 +191,8 @@ fn dipol_inter(lat: &Vec<MagnMoment>, m: usize, (row, col): (usize, usize)) -> M
                 z: 0.0,
             };
             let r_ij_len = r_ij.get_abs();
-            Some(
                 s.vec_prod_const(1.0 / r_ij_len.powi(3))
-                    + r_ij.vec_prod_const(-3.0 * s.scalar_prod(r_ij) / r_ij_len.powi(5)),
-            )
+                    + r_ij.vec_prod_const(-3.0 * s.scalar_prod(r_ij) / r_ij_len.powi(5))
         })
         .sum::<MagnMoment>()
 }
