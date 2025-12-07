@@ -6,7 +6,7 @@ use std::ops::Add;
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 800;
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 struct MagnMoment {
     x: f64,
     y: f64,
@@ -110,7 +110,74 @@ fn vec_prod(v1: MagnMoment, v2: MagnMoment) -> MagnMoment {
     }
 }
 
-fn plot_lat(lat: Vec<MagnMoment>, n: usize, m: usize, filename: &str) -> Result<()> {
+struct Lattice {
+    pub n: usize,
+    pub m: usize,
+    data: Vec<MagnMoment>,
+}
+
+impl Lattice {
+    fn new(n: usize, m: usize) -> Self {
+        Self {
+            data: vec![MagnMoment::default(); n * m],
+            n,
+            m,
+        }
+    }
+
+    fn random(n: usize, m: usize) -> Self {
+        Self {
+            data: (0..n * m).map(|_| MagnMoment::random(1.0)).collect(),
+            n,
+            m,
+        }
+    }
+
+    fn get_index(&self, y: usize, x: usize) -> usize {
+        debug_assert!(y < self.n);
+        debug_assert!(x < self.m);
+        y * self.m + x
+    }
+
+    fn get_position(&self, index: usize) -> (usize, usize) {
+        debug_assert!(index < self.n * self.m);
+        (index / self.m, index % self.m)
+    }
+
+    fn get_index_periodic(&self, y: i64, x: i64) -> usize {
+        let n_i64 = self.n as i64;
+        let m_i64 = self.m as i64;
+        let y = ((y % n_i64 + n_i64) % n_i64) as usize;
+        let x = ((x % m_i64 + m_i64) % m_i64) as usize;
+        self.get_index(y, x)
+    }
+
+    fn get(&self, y: usize, x: usize) -> &MagnMoment {
+        let index = self.get_index(y, x);
+        &self.data[index]
+    }
+
+    fn get_mut(&mut self, y: usize, x: usize) -> &mut MagnMoment {
+        let index = self.get_index(y, x);
+        &mut self.data[index]
+    }
+
+    fn get_periodic(&self, y: i64, x: i64) -> &MagnMoment {
+        let index = self.get_index_periodic(y, x);
+        &self.data[index]
+    }
+
+    fn get_periodic_mut(&mut self, y: i64, x: i64) -> &mut MagnMoment {
+        let index = self.get_index_periodic(y, x);
+        &mut self.data[index]
+    }
+
+    fn iter(&self) -> std::slice::Iter<'_, MagnMoment> {
+        self.data.iter()
+    }
+}
+
+fn plot_lat(lat: &Lattice, filename: &str) -> Result<()> {
     let root = BitMapBackend::new(filename, (WIDTH, HEIGHT)).into_drawing_area();
     root.fill(&WHITE)?;
     let mut chart = ChartBuilder::on(&root)
@@ -118,11 +185,10 @@ fn plot_lat(lat: Vec<MagnMoment>, n: usize, m: usize, filename: &str) -> Result<
         .margin(20)
         .x_label_area_size(40)
         .y_label_area_size(40)
-        .build_cartesian_2d(0..m, 0..n)?;
+        .build_cartesian_2d(0..lat.m, 0..lat.n)?;
     chart.configure_mesh().draw()?;
     for element in lat.iter().enumerate().map(|(i, value)| {
-        let y = i / m;
-        let x = i % m;
+        let (y, x) = lat.get_position(i);
         let color_val = ((value.x + 1.0) / 2.0 * 255.0) as u8;
         let color = RGBColor(color_val, color_val, color_val);
         Rectangle::new([(x, y), (x + 1, y + 1)], color.filled())
@@ -134,40 +200,36 @@ fn plot_lat(lat: Vec<MagnMoment>, n: usize, m: usize, filename: &str) -> Result<
     Ok(())
 }
 
-fn gen_lattice(n: usize, m: usize) -> Vec<MagnMoment> {
-    (0..n * m).map(|_| MagnMoment::random(1.0)).collect()
-}
-
-fn runge_kutta(
-    lat: &mut [MagnMoment],
-    m: usize,
-    gamma: f64,
-    alpha: f64,
-    dt: f64,
-    j: f64,
-    k: f64,
-    h_ext: MagnMoment,
-    l_axis: MagnMoment,
-) {
-    let lat_tmp = lat.to_vec();
-    lat_tmp.iter().enumerate().map(|(idx, magn)| {
-        let row = idx / m;
-        let col = idx % m;
-        let coord = (row, col);
-        let mut h_eff = get_h_eff(lat, m, coord, j, k, h_ext, l_axis);
-        let k1 = llg_eq(gamma, alpha, *magn, h_eff).const_prod(dt);
-        h_eff = get_h_eff(lat, m, coord, j, k, h_ext, l_axis);
-        let k2 = llg_eq(gamma, alpha, *magn + k1.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
-        h_eff = get_h_eff(lat, m, coord, j, k, h_ext, l_axis);
-        let k3 = llg_eq(gamma, alpha, *magn + k2.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
-        h_eff = get_h_eff(lat, m, coord, j, k, h_ext, l_axis);
-        let k4 = llg_eq(gamma, alpha, *magn + k3, h_eff).const_prod(dt);
-        lat[idx] = lat[idx]
-            + (k1 + k2.const_prod(2.0) + k3.const_prod(2.0) + k4)
-                .const_prod(1.0 / 6.0)
-                .normalize()
-    });
-}
+// fn runge_kutta(
+//     lat: &mut [MagnMoment],
+//     m: usize,
+//     gamma: f64,
+//     alpha: f64,
+//     dt: f64,
+//     j: f64,
+//     k: f64,
+//     h_ext: MagnMoment,
+//     l_axis: MagnMoment,
+// ) {
+//     let lat_tmp = lat.to_vec();
+//     lat_tmp.iter().enumerate().map(|(idx, magn)| {
+//         let row = idx / m;
+//         let col = idx % m;
+//         let coord = (row, col);
+//         let mut h_eff = get_h_eff(lat, m, coord, j, k, h_ext, l_axis);
+//         let k1 = llg_eq(gamma, alpha, *magn, h_eff).const_prod(dt);
+//         h_eff = get_h_eff(lat, m, coord, j, k, h_ext, l_axis);
+//         let k2 = llg_eq(gamma, alpha, *magn + k1.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
+//         h_eff = get_h_eff(lat, m, coord, j, k, h_ext, l_axis);
+//         let k3 = llg_eq(gamma, alpha, *magn + k2.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
+//         h_eff = get_h_eff(lat, m, coord, j, k, h_ext, l_axis);
+//         let k4 = llg_eq(gamma, alpha, *magn + k3, h_eff).const_prod(dt);
+//         lat[idx] = lat[idx]
+//             + (k1 + k2.const_prod(2.0) + k3.const_prod(2.0) + k4)
+//                 .const_prod(1.0 / 6.0)
+//                 .normalize()
+//     });
+// }
 
 fn llg_eq(gamma: f64, alpha: f64, magn: MagnMoment, h_eff: MagnMoment) -> MagnMoment {
     (vec_prod(magn, h_eff)
@@ -176,49 +238,48 @@ fn llg_eq(gamma: f64, alpha: f64, magn: MagnMoment, h_eff: MagnMoment) -> MagnMo
 }
 
 fn get_h_eff(
-    lat: &[MagnMoment],
-    m: usize,
+    lat: &Lattice,
     coord: (usize, usize),
     j: f64,
     k: f64,
     h_ext: MagnMoment,
     l_axis: MagnMoment,
 ) -> MagnMoment {
-    let h_exc = exchange_inter(lat, m, j, coord);
-    let h_ani = aniso_inter(lat, m, k, coord, l_axis);
-    let h_dipole = dipol_inter(lat, m, coord);
+    let h_exc = exchange_inter(lat, j, coord);
+    let h_ani = aniso_inter(lat, k, coord, l_axis);
+    let h_dipole = dipol_inter(lat, coord);
     h_ext + h_exc + h_ani + h_dipole
 }
 
-fn exchange_inter(lat: &[MagnMoment], m: usize, j: f64, (row, col): (usize, usize)) -> MagnMoment {
-    (lat[m * row + col]
-        + lat[m * row + col - 1]
-        + lat[m * row + col + 1]
-        + lat[m * (row - 1) + col]
-        + lat[m * (row + 1) + col])
-        .const_prod(j)
+fn exchange_inter(lat: &Lattice, j: f64, (row, col): (usize, usize)) -> MagnMoment {
+    let row = row as i64;
+    let col = col as i64;
+    (*lat.get_periodic(row, col)
+        + *lat.get_periodic(row, col - 1)
+        + *lat.get_periodic(row, col + 1)
+        + *lat.get_periodic(row - 1, col)
+        + *lat.get_periodic(row + 1, col))
+    .const_prod(j)
 }
 
 fn aniso_inter(
-    lat: &[MagnMoment],
-    m: usize,
+    lat: &Lattice,
     k: f64,
     (row, col): (usize, usize),
     l_axis: MagnMoment,
 ) -> MagnMoment {
-    l_axis.const_prod(2.0 * k * lat[m * row + col].scalar_prod(l_axis))
+    l_axis.const_prod(2.0 * k * lat.get(row, col).scalar_prod(l_axis))
 }
 
-fn dipol_inter(lat: &[MagnMoment], m: usize, (row, col): (usize, usize)) -> MagnMoment {
+fn dipol_inter(lat: &Lattice, (row, col): (usize, usize)) -> MagnMoment {
     lat.iter()
         .enumerate()
-        .filter(|(idx, _)| *idx != row * m + col)
+        .filter(|(idx, _)| *idx != lat.get_index(row, col))
         .map(|(idx, s)| {
-            let row_j = (idx / m) as f64;
-            let col_j = (idx % m) as f64;
+            let (row_j, col_j) = lat.get_position(idx);
             let r_ij = MagnMoment {
-                x: (col as f64 - col_j),
-                y: (row as f64 - row_j),
+                x: (col as f64 - col_j as f64),
+                y: (row as f64 - row_j as f64),
                 z: 0.0,
             };
             let r_ij_len = r_ij.get_abs();
@@ -241,8 +302,8 @@ fn main() {
         y: 1.0,
         z: 0.0,
     };
-    let mut lat = gen_lattice(100, 100);
-    let h_eff = get_h_eff(&lat, n, m, (5, 5), 10.0, 48.0, h_ext, l_axis);
+    let lat = Lattice::random(n, m);
+    let h_eff = get_h_eff(&lat, (5, 5), 10.0, 48.0, h_ext, l_axis);
     println!("H_eff = {}", h_eff.get_abs());
-    plot_lat(lat, n, m, "init_lat.png").unwrap();
+    plot_lat(&lat, "init_lat.png").unwrap();
 }
