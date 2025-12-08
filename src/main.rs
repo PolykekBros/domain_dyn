@@ -147,6 +147,8 @@ impl Lattice {
     fn get_index_periodic(&self, y: i64, x: i64) -> usize {
         let n_i64 = self.n as i64;
         let m_i64 = self.m as i64;
+        debug_assert!(y > -n_i64 && y < n_i64 * 2);
+        debug_assert!(x > -m_i64 && x < m_i64 * 2);
         let y = ((y % n_i64 + n_i64) % n_i64) as usize;
         let x = ((x % m_i64 + m_i64) % m_i64) as usize;
         self.get_index(y, x)
@@ -200,36 +202,36 @@ fn plot_lat(lat: &Lattice, filename: &str) -> Result<()> {
     Ok(())
 }
 
-// fn runge_kutta(
-//     lat: &mut [MagnMoment],
-//     m: usize,
-//     gamma: f64,
-//     alpha: f64,
-//     dt: f64,
-//     j: f64,
-//     k: f64,
-//     h_ext: MagnMoment,
-//     l_axis: MagnMoment,
-// ) {
-//     let lat_tmp = lat.to_vec();
-//     lat_tmp.iter().enumerate().map(|(idx, magn)| {
-//         let row = idx / m;
-//         let col = idx % m;
-//         let coord = (row, col);
-//         let mut h_eff = get_h_eff(lat, m, coord, j, k, h_ext, l_axis);
-//         let k1 = llg_eq(gamma, alpha, *magn, h_eff).const_prod(dt);
-//         h_eff = get_h_eff(lat, m, coord, j, k, h_ext, l_axis);
-//         let k2 = llg_eq(gamma, alpha, *magn + k1.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
-//         h_eff = get_h_eff(lat, m, coord, j, k, h_ext, l_axis);
-//         let k3 = llg_eq(gamma, alpha, *magn + k2.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
-//         h_eff = get_h_eff(lat, m, coord, j, k, h_ext, l_axis);
-//         let k4 = llg_eq(gamma, alpha, *magn + k3, h_eff).const_prod(dt);
-//         lat[idx] = lat[idx]
-//             + (k1 + k2.const_prod(2.0) + k3.const_prod(2.0) + k4)
-//                 .const_prod(1.0 / 6.0)
-//                 .normalize()
-//     });
-// }
+fn runge_kutta(
+    lat: &mut Lattice,
+    m: usize,
+    gamma: f64,
+    alpha: f64,
+    dt: f64,
+    j: f64,
+    k: f64,
+    h_ext: MagnMoment,
+    l_axis: MagnMoment,
+) {
+    let lat_tmp = lat.to_vec();
+    lat_tmp.iter().enumerate().map(|(idx, magn)| {
+        let row = idx / m;
+        let col = idx % m;
+        let coord = (row, col);
+        let mut h_eff = get_h_eff(lat, coord, j, k, h_ext, l_axis);
+        let k1 = llg_eq(gamma, alpha, *magn, h_eff).const_prod(dt);
+        h_eff = get_h_eff(lat, coord, j, k, h_ext, l_axis);
+        let k2 = llg_eq(gamma, alpha, *magn + k1.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
+        h_eff = get_h_eff(lat, coord, j, k, h_ext, l_axis);
+        let k3 = llg_eq(gamma, alpha, *magn + k2.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
+        h_eff = get_h_eff(lat, coord, j, k, h_ext, l_axis);
+        let k4 = llg_eq(gamma, alpha, *magn + k3, h_eff).const_prod(dt);
+        lat[idx] = lat[idx]
+            + (k1 + k2.const_prod(2.0) + k3.const_prod(2.0) + k4)
+                .const_prod(1.0 / 6.0)
+                .normalize()
+    });
+}
 
 fn llg_eq(gamma: f64, alpha: f64, magn: MagnMoment, h_eff: MagnMoment) -> MagnMoment {
     (vec_prod(magn, h_eff)
@@ -272,17 +274,19 @@ fn aniso_inter(
 }
 
 fn dipol_inter(lat: &Lattice, (row, col): (usize, usize)) -> MagnMoment {
-    lat.iter()
-        .enumerate()
-        .filter(|(idx, _)| *idx != lat.get_index(row, col))
-        .map(|(idx, s)| {
-            let (row_j, col_j) = lat.get_position(idx);
+    let half_n = ((lat.n - 1) / 2) as i64;
+    let half_m = ((lat.m - 1) / 2) as i64;
+    (-half_n..=half_n)
+        .flat_map(|n| (-half_m..=half_m).map(move |m| (n, m)))
+        .filter(|(n, m)| *n != 0 && *m != 0)
+        .map(|(row_j, col_j)| {
             let r_ij = MagnMoment {
-                x: (col as f64 - col_j as f64),
-                y: (row as f64 - row_j as f64),
+                x: (col as i64 + col_j) as f64,
+                y: (row as i64 + row_j) as f64,
                 z: 0.0,
             };
             let r_ij_len = r_ij.get_abs();
+            let s = lat.get_periodic(row_j, col_j);
             s.const_prod(1.0 / r_ij_len.powi(3))
                 + r_ij.const_prod(-3.0 * s.scalar_prod(r_ij) / r_ij_len.powi(5))
         })
