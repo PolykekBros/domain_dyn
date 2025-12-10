@@ -110,6 +110,7 @@ fn vec_prod(v1: MagnMoment, v2: MagnMoment) -> MagnMoment {
     }
 }
 
+#[derive(Clone)]
 struct Lattice {
     pub n: usize,
     pub m: usize,
@@ -177,6 +178,10 @@ impl Lattice {
     fn iter(&self) -> std::slice::Iter<'_, MagnMoment> {
         self.data.iter()
     }
+
+    fn iter_mut(&mut self) -> std::slice::IterMut<'_, MagnMoment> {
+        self.data.iter_mut()
+    }
 }
 
 fn plot_lat(lat: &Lattice, filename: &str) -> Result<()> {
@@ -204,7 +209,6 @@ fn plot_lat(lat: &Lattice, filename: &str) -> Result<()> {
 
 fn runge_kutta(
     lat: &mut Lattice,
-    m: usize,
     gamma: f64,
     alpha: f64,
     dt: f64,
@@ -213,20 +217,18 @@ fn runge_kutta(
     h_ext: MagnMoment,
     l_axis: MagnMoment,
 ) {
-    let lat_tmp = lat.to_vec();
-    lat_tmp.iter().enumerate().map(|(idx, magn)| {
-        let row = idx / m;
-        let col = idx % m;
-        let coord = (row, col);
-        let mut h_eff = get_h_eff(lat, coord, j, k, h_ext, l_axis);
+    let lat_prev = lat.clone();
+    lat.iter_mut().enumerate().for_each(|(idx, magn)| {
+        let coord = lat_prev.get_position(idx);
+        let mut h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
         let k1 = llg_eq(gamma, alpha, *magn, h_eff).const_prod(dt);
-        h_eff = get_h_eff(lat, coord, j, k, h_ext, l_axis);
+        h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
         let k2 = llg_eq(gamma, alpha, *magn + k1.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
-        h_eff = get_h_eff(lat, coord, j, k, h_ext, l_axis);
+        h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
         let k3 = llg_eq(gamma, alpha, *magn + k2.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
-        h_eff = get_h_eff(lat, coord, j, k, h_ext, l_axis);
+        h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
         let k4 = llg_eq(gamma, alpha, *magn + k3, h_eff).const_prod(dt);
-        lat[idx] = lat[idx]
+        *magn = lat_prev.data[idx]
             + (k1 + k2.const_prod(2.0) + k3.const_prod(2.0) + k4)
                 .const_prod(1.0 / 6.0)
                 .normalize()
@@ -250,6 +252,7 @@ fn get_h_eff(
     let h_exc = exchange_inter(lat, j, coord);
     let h_ani = aniso_inter(lat, k, coord, l_axis);
     let h_dipole = dipol_inter(lat, coord);
+    println!("h_exc: {}, h_ani: {}, h_dipole: {}", h_exc.get_abs(), h_ani.get_abs(), h_dipole.get_abs());
     h_ext + h_exc + h_ani + h_dipole
 }
 
@@ -294,6 +297,12 @@ fn dipol_inter(lat: &Lattice, (row, col): (usize, usize)) -> MagnMoment {
 }
 
 fn main() {
+    let j = 10.0;
+    let k = 48.0;
+    let gamma = 1.76_f64*10.0_f64.powi(11);
+    let alpha = 0.01;
+    
+    let time = 50;
     let n = 30;
     let m = 30;
     let h_ext = MagnMoment {
@@ -306,8 +315,12 @@ fn main() {
         y: 1.0,
         z: 0.0,
     };
-    let lat = Lattice::random(n, m);
-    let h_eff = get_h_eff(&lat, (5, 5), 10.0, 48.0, h_ext, l_axis);
+    let mut lat = Lattice::random(n, m);
+    let h_eff = get_h_eff(&lat, (5, 5), j, k, h_ext, l_axis);
     println!("H_eff = {}", h_eff.get_abs());
     plot_lat(&lat, "init_lat.png").unwrap();
+    // for _ in 0..time {
+    //     runge_kutta(&mut lat, gamma, alpha, 1.0, j, k, h_ext, l_axis);
+    // }
+    // plot_lat(&lat, "final_lat.png").unwrap();
 }
