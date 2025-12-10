@@ -252,7 +252,12 @@ fn get_h_eff(
     let h_exc = exchange_inter(lat, j, coord);
     let h_ani = aniso_inter(lat, k, coord, l_axis);
     let h_dipole = dipol_inter(lat, coord);
-    println!("h_exc: {}, h_ani: {}, h_dipole: {}", h_exc.get_abs(), h_ani.get_abs(), h_dipole.get_abs());
+    println!(
+        "h_exc: {}, h_ani: {}, h_dipole: {}",
+        h_exc.get_abs(),
+        h_ani.get_abs(),
+        h_dipole.get_abs()
+    );
     h_ext + h_exc + h_ani + h_dipole
 }
 
@@ -280,15 +285,17 @@ fn dipol_inter(lat: &Lattice, (row, col): (usize, usize)) -> MagnMoment {
     let half_n = ((lat.n - 1) / 2) as i64;
     let half_m = ((lat.m - 1) / 2) as i64;
     (-half_n..=half_n)
-        .flat_map(|n| (-half_m..=half_m).map(move |m| (n, m)))
-        .filter(|(n, m)| *n != 0 && *m != 0)
-        .map(|(row_j, col_j)| {
+        .flat_map(|d_n| (-half_m..=half_m).map(move |d_m| (d_n, d_m)))
+        .filter(|(d_n, d_m)| *d_n != 0 && *d_m != 0)
+        .map(|(d_n, d_m)| {
             let r_ij = MagnMoment {
-                x: (col as i64 + col_j) as f64,
-                y: (row as i64 + row_j) as f64,
+                x: d_n as f64,
+                y: d_m as f64,
                 z: 0.0,
             };
             let r_ij_len = r_ij.get_abs();
+            let row_j = row as i64 + d_n;
+            let col_j = col as i64 + d_m;
             let s = lat.get_periodic(row_j, col_j);
             s.const_prod(1.0 / r_ij_len.powi(3))
                 + r_ij.const_prod(-3.0 * s.scalar_prod(r_ij) / r_ij_len.powi(5))
@@ -299,9 +306,9 @@ fn dipol_inter(lat: &Lattice, (row, col): (usize, usize)) -> MagnMoment {
 fn main() {
     let j = 10.0;
     let k = 48.0;
-    let gamma = 1.76_f64*10.0_f64.powi(11);
+    let gamma = 1.76_f64 * 10.0_f64.powi(11);
     let alpha = 0.01;
-    
+
     let time = 50;
     let n = 30;
     let m = 30;
@@ -319,8 +326,8 @@ fn main() {
     let h_eff = get_h_eff(&lat, (5, 5), j, k, h_ext, l_axis);
     println!("H_eff = {}", h_eff.get_abs());
     plot_lat(&lat, "init_lat.png").unwrap();
-    // for _ in 0..time {
-    //     runge_kutta(&mut lat, gamma, alpha, 1.0, j, k, h_ext, l_axis);
-    // }
-    // plot_lat(&lat, "final_lat.png").unwrap();
+    for _ in 0..time {
+        runge_kutta(&mut lat, gamma, alpha, 1.0, j, k, h_ext, l_axis);
+    }
+    plot_lat(&lat, "final_lat.png").unwrap();
 }
