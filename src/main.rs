@@ -1,5 +1,6 @@
 use anyhow::Result;
 use plotters::prelude::*;
+use rayon::prelude::*;
 use std::iter::Sum;
 use std::ops::Add;
 
@@ -179,7 +180,35 @@ impl Lattice {
         self.data.iter()
     }
 
+    fn par_iter(&self) -> rayon::slice::Iter<'_, MagnMoment> {
+        self.data.par_iter()
+    }
+
     fn iter_mut(&mut self) -> std::slice::IterMut<'_, MagnMoment> {
+        self.data.iter_mut()
+    }
+}
+
+impl IntoIterator for Lattice {
+    type Item = MagnMoment;
+    type IntoIter = std::vec::IntoIter<MagnMoment>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.data.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Lattice {
+    type Item = &'a MagnMoment;
+    type IntoIter = std::slice::Iter<'a, MagnMoment>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.data.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut Lattice {
+    type Item = &'a mut MagnMoment;
+    type IntoIter = std::slice::IterMut<'a, MagnMoment>;
+    fn into_iter(self) -> Self::IntoIter {
         self.data.iter_mut()
     }
 }
@@ -208,7 +237,7 @@ fn plot_lat(lat: &Lattice, filename: &str) -> Result<()> {
 }
 
 fn runge_kutta(
-    lat: &mut Lattice,
+    lat: Lattice,
     gamma: f64,
     alpha: f64,
     dt: f64,
@@ -216,23 +245,30 @@ fn runge_kutta(
     k: f64,
     h_ext: MagnMoment,
     l_axis: MagnMoment,
-) {
-    let lat_prev = lat.clone();
-    lat.iter_mut().enumerate().for_each(|(idx, magn)| {
-        let coord = lat_prev.get_position(idx);
-        let h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
-        let k1 = llg_eq(gamma, alpha, *magn, h_eff).const_prod(dt);
-        // h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
-        let k2 = llg_eq(gamma, alpha, *magn + k1.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
-        // h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
-        let k3 = llg_eq(gamma, alpha, *magn + k2.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
-        // h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
-        let k4 = llg_eq(gamma, alpha, *magn + k3, h_eff).const_prod(dt);
-        *magn = (lat_prev.data[idx]
-            + (k1 + k2.const_prod(2.0) + k3.const_prod(2.0) + k4)
-                .const_prod(1.0 / 6.0))
-                .normalize()
-    });
+) -> Lattice {
+    let data = lat
+        .par_iter()
+        .enumerate()
+        .map(|(idx, magn)| {
+            let coord = lat.get_position(idx);
+            let h_eff = get_h_eff(&lat, coord, j, k, h_ext, l_axis);
+            let k1 = llg_eq(gamma, alpha, *magn, h_eff).const_prod(dt);
+            // h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
+            let k2 = llg_eq(gamma, alpha, *magn + k1.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
+            // h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
+            let k3 = llg_eq(gamma, alpha, *magn + k2.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
+            // h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
+            let k4 = llg_eq(gamma, alpha, *magn + k3, h_eff).const_prod(dt);
+            (lat.data[idx]
+                + (k1 + k2.const_prod(2.0) + k3.const_prod(2.0) + k4).const_prod(1.0 / 6.0))
+            .normalize()
+        })
+        .collect();
+    Lattice {
+        n: lat.n,
+        m: lat.m,
+        data,
+    }
 }
 
 fn llg_eq(gamma: f64, alpha: f64, magn: MagnMoment, h_eff: MagnMoment) -> MagnMoment {
@@ -252,12 +288,6 @@ fn get_h_eff(
     let h_exc = exchange_inter(lat, j, coord);
     let h_ani = aniso_inter(lat, k, coord, l_axis);
     let h_dipole = dipol_inter(lat, coord);
-    println!(
-        "h_exc: {}, h_ani: {}, h_dipole: {}",
-        h_exc.get_abs(),
-        h_ani.get_abs(),
-        h_dipole.get_abs()
-    );
     h_ext + h_exc + h_ani + h_dipole
 }
 
@@ -304,8 +334,8 @@ fn dipol_inter(lat: &Lattice, (row, col): (usize, usize)) -> MagnMoment {
 }
 
 fn main() {
-    let j = 21.0*10.0_f64.powi(-12);
-    let k = 4.8*10.0_f64.powi(4);
+    let j = 21.0 * 10.0_f64.powi(-12);
+    let k = 4.8 * 10.0_f64.powi(4);
     let gamma = 1.76_f64 * 10.0_f64.powi(11);
     let alpha = 0.01;
 
@@ -327,8 +357,9 @@ fn main() {
     let h_eff = get_h_eff(&lat, (5, 5), j, k, h_ext, l_axis);
     println!("H_eff = {}", h_eff.get_abs());
     plot_lat(&lat, "init_lat.png").unwrap();
-    for _ in 0..time {
-        runge_kutta(&mut lat, gamma, alpha, dt, j, k, h_ext, l_axis);
+    for t in 0..time {
+        lat = runge_kutta(lat, gamma, alpha, dt, j, k, h_ext, l_axis);
+        plot_lat(&lat, &format!("anim/{t}.png")).unwrap();
     }
     plot_lat(&lat, "final_lat.png").unwrap();
 }
