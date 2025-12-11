@@ -220,17 +220,17 @@ fn runge_kutta(
     let lat_prev = lat.clone();
     lat.iter_mut().enumerate().for_each(|(idx, magn)| {
         let coord = lat_prev.get_position(idx);
-        let mut h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
+        let h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
         let k1 = llg_eq(gamma, alpha, *magn, h_eff).const_prod(dt);
-        h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
+        // h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
         let k2 = llg_eq(gamma, alpha, *magn + k1.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
-        h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
+        // h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
         let k3 = llg_eq(gamma, alpha, *magn + k2.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
-        h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
+        // h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
         let k4 = llg_eq(gamma, alpha, *magn + k3, h_eff).const_prod(dt);
-        *magn = lat_prev.data[idx]
+        *magn = (lat_prev.data[idx]
             + (k1 + k2.const_prod(2.0) + k3.const_prod(2.0) + k4)
-                .const_prod(1.0 / 6.0)
+                .const_prod(1.0 / 6.0))
                 .normalize()
     });
 }
@@ -304,18 +304,19 @@ fn dipol_inter(lat: &Lattice, (row, col): (usize, usize)) -> MagnMoment {
 }
 
 fn main() {
-    let j = 10.0;
-    let k = 48.0;
+    let j = 21.0*10.0_f64.powi(-12);
+    let k = 4.8*10.0_f64.powi(4);
     let gamma = 1.76_f64 * 10.0_f64.powi(11);
     let alpha = 0.01;
 
-    let time = 50;
+    let time = 500;
+    let dt = 20.0_f64.powi(-9);
     let n = 30;
     let m = 30;
     let h_ext = MagnMoment {
         x: 0.0,
         y: 0.0,
-        z: 2.0,
+        z: 10.0,
     };
     let l_axis = MagnMoment {
         x: 0.0,
@@ -327,7 +328,7 @@ fn main() {
     println!("H_eff = {}", h_eff.get_abs());
     plot_lat(&lat, "init_lat.png").unwrap();
     for _ in 0..time {
-        runge_kutta(&mut lat, gamma, alpha, 1.0, j, k, h_ext, l_axis);
+        runge_kutta(&mut lat, gamma, alpha, dt, j, k, h_ext, l_axis);
     }
     plot_lat(&lat, "final_lat.png").unwrap();
 }
