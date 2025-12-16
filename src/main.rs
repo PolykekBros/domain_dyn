@@ -7,6 +7,12 @@ use std::ops::Add;
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 800;
 
+enum Projection {
+    X,
+    Y,
+    Z,
+}
+
 #[derive(Default, Clone, Copy)]
 struct MagnMoment {
     x: f64,
@@ -213,7 +219,7 @@ impl<'a> IntoIterator for &'a mut Lattice {
     }
 }
 
-fn plot_lat(lat: &Lattice, filename: &str) -> Result<()> {
+fn plot_lat(lat: &Lattice, filename: &str, m_proj: Projection) -> Result<()> {
     let root = BitMapBackend::new(filename, (WIDTH, HEIGHT)).into_drawing_area();
     root.fill(&WHITE)?;
     let mut chart = ChartBuilder::on(&root)
@@ -225,7 +231,11 @@ fn plot_lat(lat: &Lattice, filename: &str) -> Result<()> {
     chart.configure_mesh().draw()?;
     for element in lat.iter().enumerate().map(|(i, value)| {
         let (y, x) = lat.get_position(i);
-        let color_val = ((value.x + 1.0) / 2.0 * 255.0) as u8;
+        let color_val = match m_proj {
+            Projection::X => ((value.x + 1.0) / 2.0 * 255.0) as u8,
+            Projection::Y => ((value.y + 1.0) / 2.0 * 255.0) as u8,
+            Projection::Z => ((value.z + 1.0) / 2.0 * 255.0) as u8,
+        };
         let color = RGBColor(color_val, color_val, color_val);
         Rectangle::new([(x, y), (x + 1, y + 1)], color.filled())
     }) {
@@ -288,14 +298,18 @@ fn get_h_eff(
     let h_exc = exchange_inter(lat, j, coord);
     let h_ani = aniso_inter(lat, k, coord, l_axis);
     let h_dipole = dipol_inter(lat, coord);
-    h_ext + h_exc + h_ani + h_dipole
+    // println!(
+    //     "h_exc: {}, h_ani: {}, h_dipole: {}",
+    //     h_exc.y, h_ani.y, h_dipole.y
+    // );
+    h_exc + h_ani + h_dipole
+    // h_ext + h_exc + h_ani + h_dipole
 }
 
 fn exchange_inter(lat: &Lattice, j: f64, (row, col): (usize, usize)) -> MagnMoment {
     let row = row as i64;
     let col = col as i64;
-    (*lat.get_periodic(row, col)
-        + *lat.get_periodic(row, col - 1)
+    (*lat.get_periodic(row, col - 1)
         + *lat.get_periodic(row, col + 1)
         + *lat.get_periodic(row - 1, col)
         + *lat.get_periodic(row + 1, col))
@@ -334,15 +348,15 @@ fn dipol_inter(lat: &Lattice, (row, col): (usize, usize)) -> MagnMoment {
 }
 
 fn main() {
-    let j = 21.0 * 10.0_f64.powi(-12);
-    let k = 4.8 * 10.0_f64.powi(4);
+    let j = 10.3;
+    let k = 2.8;
     let gamma = 1.76_f64 * 10.0_f64.powi(11);
     let alpha = 0.01;
 
-    let time = 500;
+    let time = 1000;
     let dt = 20.0_f64.powi(-9);
-    let n = 30;
-    let m = 30;
+    let n = 100;
+    let m = 100;
     let h_ext = MagnMoment {
         x: 0.0,
         y: 0.0,
@@ -352,14 +366,16 @@ fn main() {
         x: 0.0,
         y: 1.0,
         z: 0.0,
-    };
+    }
+    .normalize();
     let mut lat = Lattice::random(n, m);
     let h_eff = get_h_eff(&lat, (5, 5), j, k, h_ext, l_axis);
     println!("H_eff = {}", h_eff.get_abs());
-    plot_lat(&lat, "init_lat.png").unwrap();
+    plot_lat(&lat, "init_lat.png", Projection::Y).unwrap();
     for t in 0..time {
+        println!("Current timestep: {}/{}", t, time);
         lat = runge_kutta(lat, gamma, alpha, dt, j, k, h_ext, l_axis);
-        plot_lat(&lat, &format!("anim/{t}.png")).unwrap();
+        plot_lat(&lat, &format!("anim/{t}.png"), Projection::Y).unwrap();
     }
-    plot_lat(&lat, "final_lat.png").unwrap();
+    plot_lat(&lat, "final_lat.png", Projection::Y).unwrap();
 }
