@@ -302,7 +302,7 @@ fn get_h_eff(
     //     "h_exc: {}, h_ani: {}, h_dipole: {}",
     //     h_exc.y, h_ani.y, h_dipole.y
     // );
-    h_exc + h_ani + h_dipole
+    h_exc + h_ani // + h_dipole
     // h_ext + h_exc + h_ani + h_dipole
 }
 
@@ -313,7 +313,7 @@ fn exchange_inter(lat: &Lattice, j: f64, (row, col): (usize, usize)) -> MagnMome
         + *lat.get_periodic(row, col + 1)
         + *lat.get_periodic(row - 1, col)
         + *lat.get_periodic(row + 1, col))
-    .const_prod(j)
+    .const_prod(-j)
 }
 
 fn aniso_inter(
@@ -348,13 +348,13 @@ fn dipol_inter(lat: &Lattice, (row, col): (usize, usize)) -> MagnMoment {
 }
 
 fn main() {
-    let j = 10.3;
-    let k = 2.8;
-    let gamma = 1.76_f64 * 10.0_f64.powi(11);
+    let j = 0.9;
+    let k = 0.5;
+    let gamma = 2.5;
     let alpha = 0.01;
 
     let time = 1000;
-    let dt = 20.0_f64.powi(-9);
+    let dt = 1.0_f64.powi(-8);
     let n = 100;
     let m = 100;
     let h_ext = MagnMoment {
