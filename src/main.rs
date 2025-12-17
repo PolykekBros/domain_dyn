@@ -141,6 +141,24 @@ impl Lattice {
         }
     }
 
+    fn lines(n: usize, m: usize) -> Self {
+        let data = (0..n)
+            .flat_map(|_| {
+                (0..m).map(|x| {
+                    let y = match (x / 5) % 2 {
+                        0 => 1,
+                        _ => -1,
+                    } as f64;
+                    MagnMoment {
+                        y,
+                        ..Default::default()
+                    }
+                })
+            })
+            .collect();
+        Self { data, n, m }
+    }
+
     fn get_index(&self, y: usize, x: usize) -> usize {
         debug_assert!(y < self.n);
         debug_assert!(x < self.m);
@@ -302,8 +320,8 @@ fn get_h_eff(
     //     "h_exc: {}, h_ani: {}, h_dipole: {}",
     //     h_exc.y, h_ani.y, h_dipole.y
     // );
-    h_exc + h_ani // + h_dipole
-    // h_ext + h_exc + h_ani + h_dipole
+    // h_exc + h_ani // + h_dipole
+    h_ext + h_exc + h_ani + h_dipole
 }
 
 fn exchange_inter(lat: &Lattice, j: f64, (row, col): (usize, usize)) -> MagnMoment {
@@ -348,19 +366,19 @@ fn dipol_inter(lat: &Lattice, (row, col): (usize, usize)) -> MagnMoment {
 }
 
 fn main() {
-    let j = 0.9;
-    let k = 0.5;
-    let gamma = 2.5;
+    let j = 200.9;
+    let k = 10.5;
+    let gamma = 2200000000000.5;
     let alpha = 0.01;
 
     let time = 1000;
-    let dt = 1.0_f64.powi(-8);
-    let n = 100;
-    let m = 100;
+    let dt = 3.0_f64.powi(-7);
+    let n = 50;
+    let m = 50;
     let h_ext = MagnMoment {
         x: 0.0,
         y: 0.0,
-        z: 10.0,
+        z: 50.0,
     };
     let l_axis = MagnMoment {
         x: 0.0,
@@ -368,7 +386,7 @@ fn main() {
         z: 0.0,
     }
     .normalize();
-    let mut lat = Lattice::random(n, m);
+    let mut lat = Lattice::lines(n, m);
     let h_eff = get_h_eff(&lat, (5, 5), j, k, h_ext, l_axis);
     println!("H_eff = {}", h_eff.get_abs());
     plot_lat(&lat, "init_lat.png", Projection::Y).unwrap();
