@@ -84,9 +84,9 @@ impl MagnMoment {
 
     fn random(m_abs: f64) -> Self {
         Self {
-            x: rand::random(),
-            y: rand::random(),
-            z: rand::random(),
+            x: rand::random::<f64>() * 2.0 - 1.0,
+            y: rand::random::<f64>() * 2.0 - 1.0,
+            z: rand::random::<f64>() * 2.0 - 1.0,
         }
         .const_prod(m_abs)
         .normalize()
@@ -112,7 +112,7 @@ impl MagnMoment {
 fn vec_prod(v1: MagnMoment, v2: MagnMoment) -> MagnMoment {
     MagnMoment {
         x: v1.y * v2.z - v1.z * v2.y,
-        y: v1.x * v2.z - v1.z * v2.x,
+        y: v1.z * v2.x - v1.x * v2.z,
         z: v1.x * v2.y - v1.y * v2.x,
     }
 }
@@ -274,27 +274,80 @@ fn runge_kutta(
     h_ext: MagnMoment,
     l_axis: MagnMoment,
 ) -> Lattice {
-    let data = lat
+    // 1. Calculate K1 based on current lattice
+    let k1_data: Vec<MagnMoment> = lat
         .par_iter()
         .enumerate()
-        .map(|(idx, magn)| {
-            let coord = lat.get_position(idx);
-            let h_eff = get_h_eff(&lat, coord, j, k, h_ext, l_axis);
-            let k1 = llg_eq(gamma, alpha, *magn, h_eff).const_prod(dt);
-            // h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
-            let k2 = llg_eq(gamma, alpha, *magn + k1.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
-            // h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
-            let k3 = llg_eq(gamma, alpha, *magn + k2.const_prod(1.0 / 2.0), h_eff).const_prod(dt);
-            // h_eff = get_h_eff(&lat_prev, coord, j, k, h_ext, l_axis);
-            let k4 = llg_eq(gamma, alpha, *magn + k3, h_eff).const_prod(dt);
-            (lat.data[idx]
-                + (k1 + k2.const_prod(2.0) + k3.const_prod(2.0) + k4).const_prod(1.0 / 6.0))
-            .normalize()
+        .map(|(idx, &magn)| {
+            let h_eff = get_h_eff(&lat, lat.get_position(idx), j, k, h_ext, l_axis);
+            llg_eq(gamma, alpha, magn, h_eff).const_prod(dt)
         })
         .collect();
+
+    // 2. Calculate K2 based on (lat + k1/2)
+    let lat_k1 = create_temp_lat(&lat, &k1_data, 0.5);
+    let k2_data: Vec<MagnMoment> = lat_k1
+        .par_iter()
+        .enumerate()
+        .map(|(idx, &magn)| {
+            let h_eff = get_h_eff(&lat_k1, lat_k1.get_position(idx), j, k, h_ext, l_axis);
+            llg_eq(gamma, alpha, magn, h_eff).const_prod(dt)
+        })
+        .collect();
+
+    // 3. Calculate K3 based on (lat + k2/2)
+    let lat_k2 = create_temp_lat(&lat, &k2_data, 0.5);
+    let k3_data: Vec<MagnMoment> = lat_k2
+        .par_iter()
+        .enumerate()
+        .map(|(idx, &magn)| {
+            let h_eff = get_h_eff(&lat_k2, lat_k2.get_position(idx), j, k, h_ext, l_axis);
+            llg_eq(gamma, alpha, magn, h_eff).const_prod(dt)
+        })
+        .collect();
+
+    // 4. Calculate K4 based on (lat + k3)
+    let lat_k3 = create_temp_lat(&lat, &k3_data, 1.0);
+    let k4_data: Vec<MagnMoment> = lat_k3
+        .par_iter()
+        .enumerate()
+        .map(|(idx, &magn)| {
+            let h_eff = get_h_eff(&lat_k3, lat_k3.get_position(idx), j, k, h_ext, l_axis);
+            llg_eq(gamma, alpha, magn, h_eff).const_prod(dt)
+        })
+        .collect();
+
+    // Final Assembly
+    let final_data = lat
+        .data
+        .par_iter()
+        .enumerate()
+        .map(|(i, &m_n)| {
+            let combined_k =
+                (k1_data[i] + k2_data[i].const_prod(2.0) + k3_data[i].const_prod(2.0) + k4_data[i])
+                    .const_prod(1.0 / 6.0);
+            println!("d_m: {}, m_n: {}", combined_k.y, m_n.y);
+            (m_n + combined_k).normalize()
+        })
+        .collect();
+
     Lattice {
         n: lat.n,
         m: lat.m,
+        data: final_data,
+    }
+}
+
+fn create_temp_lat(base: &Lattice, k_step: &[MagnMoment], weight: f64) -> Lattice {
+    let data = base
+        .data
+        .iter()
+        .zip(k_step.iter())
+        .map(|(&m, &k)| m + k.const_prod(weight))
+        .collect();
+    Lattice {
+        n: base.n,
+        m: base.m,
         data,
     }
 }
@@ -320,8 +373,8 @@ fn get_h_eff(
     //     "h_exc: {}, h_ani: {}, h_dipole: {}",
     //     h_exc.y, h_ani.y, h_dipole.y
     // );
-    // h_exc + h_ani // + h_dipole
-    h_ext + h_exc + h_ani + h_dipole
+    h_exc + h_ani + h_dipole
+    // h_ext + h_exc + h_ani + h_dipole
 }
 
 fn exchange_inter(lat: &Lattice, j: f64, (row, col): (usize, usize)) -> MagnMoment {
@@ -348,7 +401,7 @@ fn dipol_inter(lat: &Lattice, (row, col): (usize, usize)) -> MagnMoment {
     let half_m = ((lat.m - 1) / 2) as i64;
     (-half_n..=half_n)
         .flat_map(|d_n| (-half_m..=half_m).map(move |d_m| (d_n, d_m)))
-        .filter(|(d_n, d_m)| *d_n != 0 && *d_m != 0)
+        .filter(|(d_n, d_m)| *d_n != 0 || *d_m != 0)
         .map(|(d_n, d_m)| {
             let r_ij = MagnMoment {
                 x: d_n as f64,
@@ -366,13 +419,13 @@ fn dipol_inter(lat: &Lattice, (row, col): (usize, usize)) -> MagnMoment {
 }
 
 fn main() {
-    let j = 200.9;
-    let k = 10.5;
-    let gamma = 2200000000000.5;
+    let j = 5.3 * 10.0_f64.powi(2);
+    let k = 4.8 * 10.0_f64.powi(4);
+    let gamma = 1.76 * 10.0_f64.powi(11);
     let alpha = 0.01;
 
     let time = 1000;
-    let dt = 3.0_f64.powi(-7);
+    let dt = 3.0_f64.powi(-13);
     let n = 50;
     let m = 50;
     let h_ext = MagnMoment {
