@@ -266,7 +266,6 @@ fn plot_lat(lat: &Lattice, filename: &str, m_proj: Projection) -> Result<()> {
 
 fn runge_kutta(
     lat: Lattice,
-    gamma: f64,
     alpha: f64,
     dt: f64,
     j: f64,
@@ -280,7 +279,7 @@ fn runge_kutta(
         .enumerate()
         .map(|(idx, &magn)| {
             let h_eff = get_h_eff(&lat, lat.get_position(idx), j, k, h_ext, l_axis);
-            llg_eq(gamma, alpha, magn, h_eff).const_prod(dt)
+            llg_eq(alpha, magn, h_eff).const_prod(dt)
         })
         .collect();
 
@@ -291,7 +290,7 @@ fn runge_kutta(
         .enumerate()
         .map(|(idx, &magn)| {
             let h_eff = get_h_eff(&lat_k1, lat_k1.get_position(idx), j, k, h_ext, l_axis);
-            llg_eq(gamma, alpha, magn, h_eff).const_prod(dt)
+            llg_eq(alpha, magn, h_eff).const_prod(dt)
         })
         .collect();
 
@@ -302,7 +301,7 @@ fn runge_kutta(
         .enumerate()
         .map(|(idx, &magn)| {
             let h_eff = get_h_eff(&lat_k2, lat_k2.get_position(idx), j, k, h_ext, l_axis);
-            llg_eq(gamma, alpha, magn, h_eff).const_prod(dt)
+            llg_eq(alpha, magn, h_eff).const_prod(dt)
         })
         .collect();
 
@@ -313,7 +312,7 @@ fn runge_kutta(
         .enumerate()
         .map(|(idx, &magn)| {
             let h_eff = get_h_eff(&lat_k3, lat_k3.get_position(idx), j, k, h_ext, l_axis);
-            llg_eq(gamma, alpha, magn, h_eff).const_prod(dt)
+            llg_eq(alpha, magn, h_eff).const_prod(dt)
         })
         .collect();
 
@@ -326,7 +325,7 @@ fn runge_kutta(
             let combined_k =
                 (k1_data[i] + k2_data[i].const_prod(2.0) + k3_data[i].const_prod(2.0) + k4_data[i])
                     .const_prod(1.0 / 6.0);
-            println!("d_m: {}, m_n: {}", combined_k.y, m_n.y);
+            // println!("d_m: {}, m_n: {}", combined_k.y, m_n.y);
             (m_n + combined_k).normalize()
         })
         .collect();
@@ -352,11 +351,20 @@ fn create_temp_lat(base: &Lattice, k_step: &[MagnMoment], weight: f64) -> Lattic
     }
 }
 
-fn llg_eq(gamma: f64, alpha: f64, magn: MagnMoment, h_eff: MagnMoment) -> MagnMoment {
-    (vec_prod(magn, h_eff)
-        + vec_prod(magn, vec_prod(magn, h_eff)).const_prod(alpha / magn.get_abs()))
-    .const_prod(-gamma / (1.0 + alpha.powi(2)))
+fn llg_eq(alpha: f64, magn: MagnMoment, h_eff: MagnMoment) -> MagnMoment {
+    let gamma_prime = -1.0 / (1.0 + alpha.powi(2));
+
+    let precession = vec_prod(magn, h_eff);
+    let damping = vec_prod(magn, precession).const_prod(alpha);
+
+    (precession + damping).const_prod(gamma_prime)
 }
+
+// fn llg_eq(gamma: f64, alpha: f64, magn: MagnMoment, h_eff: MagnMoment) -> MagnMoment {
+//     (vec_prod(magn, h_eff)
+//         + vec_prod(magn, vec_prod(magn, h_eff)).const_prod(alpha / magn.get_abs()))
+//     .const_prod(-gamma / (1.0 + alpha.powi(2)))
+// }
 
 fn get_h_eff(
     lat: &Lattice,
@@ -419,19 +427,22 @@ fn dipol_inter(lat: &Lattice, (row, col): (usize, usize)) -> MagnMoment {
 }
 
 fn main() {
-    let j = 5.3 * 10.0_f64.powi(2);
-    let k = 4.8 * 10.0_f64.powi(4);
-    let gamma = 1.76 * 10.0_f64.powi(11);
+    // let j = 5.3 * 10.0_f64.powi(2);
+    // let k = 4.8 * 10.0_f64.powi(4);
+    // let gamma = 1.76 * 10.0_f64.powi(11);
+    let j = 1.0;
+    let k = 0.5;
     let alpha = 0.01;
 
     let time = 1000;
-    let dt = 3.0_f64.powi(-13);
+    // let dt = 3.0_f64.powi(-15);
+    let dt = 0.01;
     let n = 50;
     let m = 50;
     let h_ext = MagnMoment {
         x: 0.0,
         y: 0.0,
-        z: 50.0,
+        z: 1.0,
     };
     let l_axis = MagnMoment {
         x: 0.0,
@@ -439,13 +450,13 @@ fn main() {
         z: 0.0,
     }
     .normalize();
-    let mut lat = Lattice::lines(n, m);
+    let mut lat = Lattice::random(n, m);
     let h_eff = get_h_eff(&lat, (5, 5), j, k, h_ext, l_axis);
     println!("H_eff = {}", h_eff.get_abs());
     plot_lat(&lat, "init_lat.png", Projection::Y).unwrap();
     for t in 0..time {
         println!("Current timestep: {}/{}", t, time);
-        lat = runge_kutta(lat, gamma, alpha, dt, j, k, h_ext, l_axis);
+        lat = runge_kutta(lat, alpha, dt, j, k, h_ext, l_axis);
         plot_lat(&lat, &format!("anim/{t}.png"), Projection::Y).unwrap();
     }
     plot_lat(&lat, "final_lat.png", Projection::Y).unwrap();
