@@ -1,6 +1,8 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use plotters::prelude::*;
 use rayon::prelude::*;
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::iter::Sum;
 use std::ops::Add;
 
@@ -241,7 +243,7 @@ fn plot_lat(lat: &Lattice, filename: &str, m_proj: Projection) -> Result<()> {
     let root = BitMapBackend::new(filename, (WIDTH, HEIGHT)).into_drawing_area();
     root.fill(&WHITE)?;
     let mut chart = ChartBuilder::on(&root)
-        .caption("Boolean Matrix Heatmap", ("sans-serif", 40).into_font())
+        .caption("Magnetization Heatmap", ("sans-serif", 40).into_font())
         .margin(20)
         .x_label_area_size(40)
         .y_label_area_size(40)
@@ -261,6 +263,15 @@ fn plot_lat(lat: &Lattice, filename: &str, m_proj: Projection) -> Result<()> {
     }
     root.present()?;
     println!("✅ Heatmap saved to {filename}");
+    Ok(())
+}
+
+fn save_lat_to_txt(lat: &Lattice, filename: &str) -> Result<()> {
+    let file = File::create(filename).with_context(|| format!("file: {filename}"))?;
+    let mut w = BufWriter::new(file);
+    for (x, val) in lat.data[0..lat.m].iter().enumerate() {
+        write!(w, "{}\t{}\n", x, val.y)?;
+    }
     Ok(())
 }
 
@@ -392,7 +403,7 @@ fn exchange_inter(lat: &Lattice, j: f64, (row, col): (usize, usize)) -> MagnMome
         + *lat.get_periodic(row, col + 1)
         + *lat.get_periodic(row - 1, col)
         + *lat.get_periodic(row + 1, col))
-    .const_prod(-j)
+    .const_prod(j)
 }
 
 fn aniso_inter(
@@ -430,11 +441,11 @@ fn main() {
     // let j = 5.3 * 10.0_f64.powi(2);
     // let k = 4.8 * 10.0_f64.powi(4);
     // let gamma = 1.76 * 10.0_f64.powi(11);
-    let j = 1.0;
-    let k = 0.5;
+    let j = 3.0;
+    let k = 1.0;
     let alpha = 0.01;
 
-    let time = 1000;
+    let time = 1500;
     // let dt = 3.0_f64.powi(-15);
     let dt = 0.01;
     let n = 50;
@@ -450,7 +461,7 @@ fn main() {
         z: 0.0,
     }
     .normalize();
-    let mut lat = Lattice::random(n, m);
+    let mut lat = Lattice::lines(n, m);
     let h_eff = get_h_eff(&lat, (5, 5), j, k, h_ext, l_axis);
     println!("H_eff = {}", h_eff.get_abs());
     plot_lat(&lat, "init_lat.png", Projection::Y).unwrap();
@@ -460,4 +471,5 @@ fn main() {
         plot_lat(&lat, &format!("anim/{t}.png"), Projection::Y).unwrap();
     }
     plot_lat(&lat, "final_lat.png", Projection::Y).unwrap();
+    save_lat_to_txt(&lat, "final_lat.txt").unwrap();
 }
