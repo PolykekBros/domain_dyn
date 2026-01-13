@@ -441,11 +441,11 @@ fn main() {
     // let j = 5.3 * 10.0_f64.powi(2);
     // let k = 4.8 * 10.0_f64.powi(4);
     // let gamma = 1.76 * 10.0_f64.powi(11);
-    let j = 3.0;
-    let k = 1.0;
+    let j = 15.0;
+    let k = 5.0;
     let alpha = 0.01;
 
-    let time = 1500;
+    let time = 1000;
     // let dt = 3.0_f64.powi(-15);
     let dt = 0.01;
     let n = 50;
